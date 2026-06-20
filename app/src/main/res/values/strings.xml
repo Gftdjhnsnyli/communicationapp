@@ -1,0 +1,47 @@
+<resources>
+    <!-- App Name -->
+    <string name="app_name">Communication App</string>
+
+    <!-- UI Elements (Layout) -->
+    <string name="title_main">Communication App</string>
+    <string name="title_conversations">Messages</string>
+    <string name="hint_phone">Enter Phone Number</string>
+    <string name="hint_message">Enter Message</string>
+    <string name="btn_sms">Send SMS</string>
+    <string name="btn_call">Make Phone Call</string>
+    <string name="btn_notification">Show Notification</string>
+    <string name="btn_dialog">Show Dialog Box</string>
+
+    <string name="fab_start_chat">Start chat</string>
+    <string name="hint_text_message">Text message</string>
+    <string name="content_desc_send">Send</string>
+    <string name="title_new_message">New Message</string>
+    <string name="msg_delivered">Message Delivered</string>
+
+    <!-- Toast Messages -->
+    <string name="toast_empty_sms">Please enter phone number and message</string>
+    <string name="toast_sms_sent">SMS sent successfully</string>
+    <string name="toast_sms_failed">Failed to send SMS: </string>
+    <string name="toast_empty_phone">Please enter a phone number</string>
+    <string name="toast_no_sms_perm">SMS permission not granted</string>
+    <string name="toast_no_call_perm">Call permission not granted</string>
+    <string name="toast_notif_shown">Notification shown</string>
+    <string name="toast_no_notif_perm">Notification permission not granted</string>
+    <string name="toast_clicked_ok">You clicked OK</string>
+    <string name="toast_clicked_cancel">You clicked Cancel</string>
+    <string name="toast_clicked_info">You clicked Info</string>
+
+    <!-- Notification Strings -->
+    <string name="notif_channel_name">Communication Channel</string>
+    <string name="notif_channel_desc">Channel for communication notifications</string>
+    <string name="notif_default_msg">This is a test notification</string>
+    <string name="notif_title">Communication App</string>
+
+    <!-- Dialog Strings -->
+    <string name="dialog_title">Dialog Box</string>
+    <string name="dialog_message">This is an alert dialog. What would you like to do?</string>
+    <string name="dialog_btn_ok">OK</string>
+    <string name="dialog_btn_cancel">Cancel</string>
+    <string name="dialog_btn_info">Info</string>
+    <string name="search_hint">Search conversations</string>
+</resources>
