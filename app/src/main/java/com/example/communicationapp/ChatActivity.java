@@ -16,6 +16,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.ContactsContract;
 import android.provider.Telephony;
+import android.telecom.PhoneAccount;
+import android.telecom.PhoneAccountHandle;
+import android.telecom.TelecomManager;
+import android.content.ComponentName;
 import android.telephony.SmsManager;
 import android.view.View;
 import android.widget.EditText;
@@ -30,6 +34,8 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ChatActivity extends AppCompatActivity {
 
@@ -43,6 +49,7 @@ public class ChatActivity extends AppCompatActivity {
     private static final String SENT_ACTION = "SMS_SENT";
     private static final String DELIVERED_ACTION = "SMS_DELIVERED";
     private ContentObserver smsObserver;
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +79,9 @@ public class ChatActivity extends AppCompatActivity {
         editTextMessage = findViewById(R.id.editTextMessage);
         FloatingActionButton btnSend = findViewById(R.id.btnSendMessage);
         btnSend.setOnClickListener(v -> sendMessage());
+
+        ImageButton btnCall = findViewById(R.id.btnCall);
+        btnCall.setOnClickListener(v -> placeCall());
 
         // Keyboard listener to scroll messages
         recyclerView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, right1, oldBottom) -> {
@@ -136,32 +146,39 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void loadMessages() {
-        messageList.clear();
-        String selection = Telephony.Sms.THREAD_ID + " = ?";
-        String[] selectionArgs = {threadId};
-        Cursor cursor = getContentResolver().query(Telephony.Sms.CONTENT_URI, null, selection, selectionArgs, Telephony.Sms.DATE + " ASC");
+        executorService.execute(() -> {
+            List<Message> newMessages = new ArrayList<>();
+            String selection = Telephony.Sms.THREAD_ID + " = ?";
+            String[] selectionArgs = {threadId};
+            Cursor cursor = getContentResolver().query(Telephony.Sms.CONTENT_URI, null, selection, selectionArgs, Telephony.Sms.DATE + " ASC");
 
-        if (cursor != null) {
-            int idIndex = cursor.getColumnIndex(Telephony.Sms._ID);
-            int bodyIndex = cursor.getColumnIndex(Telephony.Sms.BODY);
-            int dateIndex = cursor.getColumnIndex(Telephony.Sms.DATE);
-            int typeIndex = cursor.getColumnIndex(Telephony.Sms.TYPE);
-            int statusIndex = cursor.getColumnIndex(Telephony.Sms.STATUS);
+            if (cursor != null) {
+                int idIndex = cursor.getColumnIndex(Telephony.Sms._ID);
+                int bodyIndex = cursor.getColumnIndex(Telephony.Sms.BODY);
+                int dateIndex = cursor.getColumnIndex(Telephony.Sms.DATE);
+                int typeIndex = cursor.getColumnIndex(Telephony.Sms.TYPE);
+                int statusIndex = cursor.getColumnIndex(Telephony.Sms.STATUS);
 
-            while (cursor.moveToNext()) {
-                long id = cursor.getLong(idIndex);
-                String body = cursor.getString(bodyIndex);
-                long date = cursor.getLong(dateIndex);
-                int type = cursor.getInt(typeIndex);
-                int status = cursor.getInt(statusIndex);
-                messageList.add(new Message(id, address, body, date, type, status));
+                while (cursor.moveToNext()) {
+                    long id = cursor.getLong(idIndex);
+                    String body = cursor.getString(bodyIndex);
+                    long date = cursor.getLong(dateIndex);
+                    int type = cursor.getInt(typeIndex);
+                    int status = cursor.getInt(statusIndex);
+                    newMessages.add(new Message(id, address, body, date, type, status));
+                }
+                cursor.close();
             }
-            cursor.close();
-        }
-        adapter.notifyDataSetChanged();
-        if (messageList.size() > 0) {
-            recyclerView.scrollToPosition(messageList.size() - 1);
-        }
+
+            new Handler(Looper.getMainLooper()).post(() -> {
+                messageList.clear();
+                messageList.addAll(newMessages);
+                adapter.notifyDataSetChanged();
+                if (messageList.size() > 0) {
+                    recyclerView.scrollToPosition(messageList.size() - 1);
+                }
+            });
+        });
     }
 
     private void sendMessage() {
@@ -181,6 +198,30 @@ public class ChatActivity extends AppCompatActivity {
         
         // Refresh immediately for local feedback
         loadMessages();
+    }
+
+    private void placeCall() {
+        TelecomManager telecomManager = (TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+        PhoneAccountHandle phoneAccountHandle = new PhoneAccountHandle(
+                new ComponentName(this, MyConnectionService.class), "CommunicationAppAccount");
+
+        // Register phone account if not already registered
+        PhoneAccount phoneAccount = PhoneAccount.builder(phoneAccountHandle, "Communication App")
+                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
+                .build();
+        telecomManager.registerPhoneAccount(phoneAccount);
+
+        Bundle extras = new Bundle();
+        extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, phoneAccountHandle);
+        extras.putInt(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, android.telecom.VideoProfile.STATE_AUDIO_ONLY);
+
+        Uri uri = Uri.fromParts(PhoneAccount.SCHEME_TEL, address, null);
+        try {
+            telecomManager.placeCall(uri, extras);
+            // We removed the redundant CallActivity start from here
+        } catch (SecurityException e) {
+            Toast.makeText(this, "Call permission not granted", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private BroadcastReceiver smsStatusReceiver = new BroadcastReceiver() {
@@ -207,5 +248,11 @@ public class ChatActivity extends AppCompatActivity {
         super.onPause();
         unregisterReceiver(smsStatusReceiver);
         getContentResolver().unregisterContentObserver(smsObserver);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        executorService.shutdown();
     }
 }

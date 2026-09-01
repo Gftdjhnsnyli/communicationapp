@@ -44,4 +44,11 @@
     <string name="dialog_btn_cancel">Cancel</string>
     <string name="dialog_btn_info">Info</string>
     <string name="search_hint">Search conversations</string>
+    <string name="content_desc_call">Call</string>
+    <string name="btn_answer">Answer</string>
+    <string name="btn_reject">Reject</string>
+    <string name="btn_hangup">Hangup</string>
+    <string name="call_status_ringing">Ringing...</string>
+    <string name="call_status_active">Active Call</string>
+    <string name="call_status_disconnected">Disconnected</string>
 </resources>

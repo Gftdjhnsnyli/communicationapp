@@ -63,6 +63,15 @@
                 android:ellipsize="end"
                 tools:text="Contact Name" />
 
+            <ImageButton
+                android:id="@+id/btnCall"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_call"
+                app:tint="?attr/colorOnSurfaceVariant"
+                android:contentDescription="@string/content_desc_call" />
+
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 

@@ -19,6 +19,8 @@ import com.google.android.material.floatingactionbutton.ExtendedFloatingActionBu
 import androidx.core.splashscreen.SplashScreen;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ConversationListActivity extends AppCompatActivity {
 
@@ -26,6 +28,7 @@ public class ConversationListActivity extends AppCompatActivity {
     private RecyclerView recyclerView;
     private ConversationAdapter adapter;
     private List<Conversation> conversationList = new ArrayList<>();
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,37 +99,44 @@ public class ConversationListActivity extends AppCompatActivity {
             return;
         }
 
-        conversationList.clear();
-        Uri uri = Telephony.Threads.CONTENT_URI.buildUpon().appendQueryParameter("simple", "true").build();
-        String[] projection = {
-            Telephony.Threads._ID,
-            Telephony.Threads.SNIPPET,
-            Telephony.Threads.DATE,
-            Telephony.Threads.RECIPIENT_IDS
-        };
+        executorService.execute(() -> {
+            List<Conversation> newConversations = new ArrayList<>();
+            Uri uri = Telephony.Threads.CONTENT_URI.buildUpon().appendQueryParameter("simple", "true").build();
+            String[] projection = {
+                Telephony.Threads._ID,
+                Telephony.Threads.SNIPPET,
+                Telephony.Threads.DATE,
+                Telephony.Threads.RECIPIENT_IDS
+            };
 
-        Cursor cursor = getContentResolver().query(uri, projection, null, null, Telephony.Threads.DATE + " DESC");
+            Cursor cursor = getContentResolver().query(uri, projection, null, null, Telephony.Threads.DATE + " DESC");
 
-        if (cursor != null) {
-            int idIndex = cursor.getColumnIndex(Telephony.Threads._ID);
-            int snippetIndex = cursor.getColumnIndex(Telephony.Threads.SNIPPET);
-            int dateIndex = cursor.getColumnIndex(Telephony.Threads.DATE);
-            int recipientIndex = cursor.getColumnIndex(Telephony.Threads.RECIPIENT_IDS);
+            if (cursor != null) {
+                int idIndex = cursor.getColumnIndex(Telephony.Threads._ID);
+                int snippetIndex = cursor.getColumnIndex(Telephony.Threads.SNIPPET);
+                int dateIndex = cursor.getColumnIndex(Telephony.Threads.DATE);
+                int recipientIndex = cursor.getColumnIndex(Telephony.Threads.RECIPIENT_IDS);
 
-            while (cursor.moveToNext()) {
-                String threadId = cursor.getString(idIndex);
-                String snippet = cursor.getString(snippetIndex);
-                long date = cursor.getLong(dateIndex);
-                String recipientId = cursor.getString(recipientIndex);
+                while (cursor.moveToNext()) {
+                    String threadId = cursor.getString(idIndex);
+                    String snippet = cursor.getString(snippetIndex);
+                    long date = cursor.getLong(dateIndex);
+                    String recipientId = cursor.getString(recipientIndex);
 
-                String address = getAddressFromRecipientId(recipientId);
-                String contactName = getContactName(address);
+                    String address = getAddressFromRecipientId(recipientId);
+                    String contactName = getContactName(address);
 
-                conversationList.add(new Conversation(threadId, address, contactName, snippet, date));
+                    newConversations.add(new Conversation(threadId, address, contactName, snippet, date));
+                }
+                cursor.close();
             }
-            cursor.close();
-        }
-        adapter.notifyDataSetChanged();
+
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                conversationList.clear();
+                conversationList.addAll(newConversations);
+                adapter.notifyDataSetChanged();
+            });
+        });
     }
 
     private String getAddressFromRecipientId(String recipientId) {
@@ -165,5 +175,11 @@ public class ConversationListActivity extends AppCompatActivity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
             loadConversations();
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        executorService.shutdown();
     }
 }
