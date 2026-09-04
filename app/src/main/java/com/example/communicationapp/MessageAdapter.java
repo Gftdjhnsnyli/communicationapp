@@ -1,99 +1,126 @@
 package com.example.communicationapp;
 
-import android.provider.Telephony;
 import android.text.format.DateFormat;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+
 import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
-import java.util.List;
 
-public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+import com.example.communicationapp.data.MessageEntity;
+import com.example.communicationapp.data.SmsState;
 
-    private static final int VIEW_TYPE_SENT = 1;
-    private static final int VIEW_TYPE_RECEIVED = 2;
+public class MessageAdapter extends ListAdapter<MessageEntity, RecyclerView.ViewHolder> {
+    public interface RetryListener {
+        void onRetry(MessageEntity message);
+    }
+    private static final int SENT = 1;
+    private static final int RECEIVED = 2;
 
-    private List<Message> messages;
+    private static final DiffUtil.ItemCallback<MessageEntity> DIFF = new DiffUtil.ItemCallback<>() {
+        @Override
+        public boolean areItemsTheSame(@NonNull MessageEntity oldItem,
+                                       @NonNull MessageEntity newItem) {
+            return oldItem.localId.equals(newItem.localId);
+        }
 
-    public MessageAdapter(List<Message> messages) {
-        this.messages = messages;
+        @Override
+        public boolean areContentsTheSame(@NonNull MessageEntity oldItem,
+                                          @NonNull MessageEntity newItem) {
+            return oldItem.body.equals(newItem.body)
+                    && oldItem.date == newItem.date
+                    && oldItem.sendState == newItem.sendState
+                    && oldItem.deliveryState == newItem.deliveryState
+                    && oldItem.read == newItem.read;
+        }
+    };
+
+    private final RetryListener retryListener;
+
+    public MessageAdapter(RetryListener retryListener) {
+        super(DIFF);
+        this.retryListener = retryListener;
     }
 
     @Override
     public int getItemViewType(int position) {
-        Message message = messages.get(position);
-        if (message.getType() == Telephony.Sms.MESSAGE_TYPE_SENT) {
-            return VIEW_TYPE_SENT;
-        } else {
-            return VIEW_TYPE_RECEIVED;
-        }
+        return getItem(position).outgoing ? SENT : RECEIVED;
     }
 
     @NonNull
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        if (viewType == VIEW_TYPE_SENT) {
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message_sent, parent, false);
-            return new SentViewHolder(view);
-        } else {
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message_received, parent, false);
-            return new ReceivedViewHolder(view);
-        }
+        int layout = viewType == SENT
+                ? R.layout.item_message_sent : R.layout.item_message_received;
+        View view = LayoutInflater.from(parent.getContext()).inflate(layout, parent, false);
+        return viewType == SENT ? new SentViewHolder(view) : new ReceivedViewHolder(view);
     }
 
     @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-        Message message = messages.get(position);
-        String timeString = DateFormat.format("h:mm a", message.getDate()).toString();
-
+        MessageEntity message = getItem(position);
+        String time = DateFormat.format("h:mm a", message.date).toString();
         if (holder instanceof SentViewHolder) {
-            ((SentViewHolder) holder).textMessage.setText(message.getBody());
-            ((SentViewHolder) holder).textTime.setText(timeString);
-            
-            // Delivery report logic
-            int status = message.getStatus();
-            if (status == Telephony.Sms.STATUS_COMPLETE) {
-                ((SentViewHolder) holder).imageStatus.setImageResource(android.R.drawable.checkbox_on_background);
-                ((SentViewHolder) holder).imageStatus.setVisibility(View.VISIBLE);
-            } else if (status == Telephony.Sms.STATUS_PENDING) {
-                ((SentViewHolder) holder).imageStatus.setImageResource(android.R.drawable.ic_menu_send);
-                ((SentViewHolder) holder).imageStatus.setVisibility(View.VISIBLE);
+            SentViewHolder sent = (SentViewHolder) holder;
+            sent.message.setText(message.body);
+            sent.time.setText(time);
+            sent.status.setVisibility(View.VISIBLE);
+            if (message.sendState == SmsState.SEND_FAILED
+                    || message.deliveryState == SmsState.DELIVERY_FAILED) {
+                sent.status.setImageResource(android.R.drawable.stat_notify_error);
+                sent.status.setContentDescription(sent.itemView.getContext()
+                        .getString(R.string.status_failed));
+                sent.status.setOnClickListener(v -> retryListener.onRetry(message));
+            } else if (message.deliveryState == SmsState.DELIVERY_COMPLETE) {
+                sent.status.setImageResource(android.R.drawable.checkbox_on_background);
+                sent.status.setContentDescription(sent.itemView.getContext()
+                        .getString(R.string.status_delivered));
+            } else if (message.sendState == SmsState.SEND_SENT) {
+                sent.status.setImageResource(android.R.drawable.checkbox_off_background);
+                sent.status.setContentDescription(sent.itemView.getContext()
+                        .getString(R.string.status_sent));
             } else {
-                ((SentViewHolder) holder).imageStatus.setVisibility(View.GONE);
+                sent.status.setImageResource(android.R.drawable.ic_menu_upload);
+                sent.status.setContentDescription(sent.itemView.getContext()
+                        .getString(R.string.status_sending));
+            }
+            if (message.sendState != SmsState.SEND_FAILED
+                    && message.deliveryState != SmsState.DELIVERY_FAILED) {
+                sent.status.setOnClickListener(null);
             }
         } else {
-            ((ReceivedViewHolder) holder).textMessage.setText(message.getBody());
-            ((ReceivedViewHolder) holder).textTime.setText(timeString);
+            ReceivedViewHolder received = (ReceivedViewHolder) holder;
+            received.message.setText(message.body);
+            received.time.setText(time);
         }
     }
 
-    @Override
-    public int getItemCount() {
-        return messages.size();
-    }
-
     static class SentViewHolder extends RecyclerView.ViewHolder {
-        TextView textMessage, textTime;
-        ImageView imageStatus;
+        final TextView message;
+        final TextView time;
+        final ImageView status;
 
         SentViewHolder(View itemView) {
             super(itemView);
-            textMessage = itemView.findViewById(R.id.textMessage);
-            textTime = itemView.findViewById(R.id.textTime);
-            imageStatus = itemView.findViewById(R.id.imageStatus);
+            message = itemView.findViewById(R.id.textMessage);
+            time = itemView.findViewById(R.id.textTime);
+            status = itemView.findViewById(R.id.imageStatus);
         }
     }
 
     static class ReceivedViewHolder extends RecyclerView.ViewHolder {
-        TextView textMessage, textTime;
+        final TextView message;
+        final TextView time;
 
         ReceivedViewHolder(View itemView) {
             super(itemView);
-            textMessage = itemView.findViewById(R.id.textMessage);
-            textTime = itemView.findViewById(R.id.textTime);
+            message = itemView.findViewById(R.id.textMessage);
+            time = itemView.findViewById(R.id.textTime);
         }
     }
 }

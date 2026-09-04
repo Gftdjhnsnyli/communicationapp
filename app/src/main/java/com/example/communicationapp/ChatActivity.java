@@ -1,258 +1,202 @@
 package com.example.communicationapp;
 
-import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
-import android.content.ContentUris;
-import android.content.Context;
+import android.Manifest;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.database.ContentObserver;
-import android.database.Cursor;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.provider.ContactsContract;
-import android.provider.Telephony;
-import android.telecom.PhoneAccount;
-import android.telecom.PhoneAccountHandle;
-import android.telecom.TelecomManager;
-import android.content.ComponentName;
-import android.telephony.SmsManager;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageButton;
-import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.example.communicationapp.data.SmsRepository;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
-import java.io.InputStream;
-import java.util.ArrayList;
+import com.google.android.material.button.MaterialButton;
+
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class ChatActivity extends AppCompatActivity {
+    public static final String EXTRA_CONVERSATION_KEY = "conversation_key";
+    public static final String EXTRA_ADDRESS = "address";
+    public static final String EXTRA_CONTACT_NAME = "contact_name";
+    public static final String EXTRA_INITIAL_MESSAGE = "initial_message";
 
-    private String threadId;
-    private String address;
-    private String contactName;
+    private ChatViewModel viewModel;
     private RecyclerView recyclerView;
     private MessageAdapter adapter;
-    private List<Message> messageList = new ArrayList<>();
-    private EditText editTextMessage;
-    private static final String SENT_ACTION = "SMS_SENT";
-    private static final String DELIVERED_ACTION = "SMS_DELIVERED";
-    private ContentObserver smsObserver;
-    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+    private String address;
+    private String conversationKey;
+    private int selectedSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+    private static volatile String visibleConversationKey;
+
+    public static boolean isConversationVisible(String key) {
+        return key != null && key.equals(visibleConversationKey);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
-        threadId = getIntent().getStringExtra("thread_id");
-        address = getIntent().getStringExtra("address");
-        contactName = getIntent().getStringExtra("contact_name");
-
-        if (threadId == null || address == null) {
-            Toast.makeText(this, "Error: Invalid conversation data", Toast.LENGTH_SHORT).show();
+        address = getIntent().getStringExtra(EXTRA_ADDRESS);
+        conversationKey = getIntent().getStringExtra(EXTRA_CONVERSATION_KEY);
+        String contactName = getIntent().getStringExtra(EXTRA_CONTACT_NAME);
+        if (address == null || address.isBlank()) {
+            Toast.makeText(this, R.string.invalid_conversation, Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
+        if (conversationKey == null || conversationKey.isBlank()) {
+            conversationKey = SmsRepository.normalizeAddress(address);
+        }
 
-        setupToolbar();
+        findViewById(R.id.btnBack).setOnClickListener(v -> finish());
+        ((TextView) findViewById(R.id.textContactNameToolbar)).setText(
+                contactName == null || contactName.isBlank() ? address : contactName);
+        ((ImageButton) findViewById(R.id.btnCall)).setOnClickListener(v -> showCallOptions());
 
         recyclerView = findViewById(R.id.recyclerViewMessages);
         LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         layoutManager.setStackFromEnd(true);
         recyclerView.setLayoutManager(layoutManager);
-        
-        adapter = new MessageAdapter(messageList);
+        adapter = new MessageAdapter(message -> new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.retry_message_title)
+                .setMessage(R.string.retry_message_prompt)
+                .setPositiveButton(R.string.retry, (dialog, which) -> viewModel.send(
+                        message.body, message.subscriptionId == null
+                                ? selectedSubscriptionId : message.subscriptionId))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show());
         recyclerView.setAdapter(adapter);
 
-        editTextMessage = findViewById(R.id.editTextMessage);
-        FloatingActionButton btnSend = findViewById(R.id.btnSendMessage);
-        btnSend.setOnClickListener(v -> sendMessage());
-
-        ImageButton btnCall = findViewById(R.id.btnCall);
-        btnCall.setOnClickListener(v -> placeCall());
-
-        // Keyboard listener to scroll messages
-        recyclerView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, right1, oldBottom) -> {
-            if (bottom < oldBottom) {
-                recyclerView.postDelayed(() -> {
-                    if (messageList.size() > 0) {
-                        recyclerView.smoothScrollToPosition(messageList.size() - 1);
-                    }
-                }, 100);
-            }
-        });
-
-        setupSmsObserver();
-        loadMessages();
-    }
-
-    private void setupToolbar() {
-        ImageButton btnBack = findViewById(R.id.btnBack);
-        ImageView imageContactToolbar = findViewById(R.id.imageContactToolbar);
-        TextView textContactNameToolbar = findViewById(R.id.textContactNameToolbar);
-
-        btnBack.setOnClickListener(v -> finish());
-        textContactNameToolbar.setText(contactName);
-
-        Bitmap photo = getContactPhoto(address);
-        if (photo != null) {
-            imageContactToolbar.setImageBitmap(photo);
-        } else {
-            imageContactToolbar.setImageResource(R.drawable.images);
-        }
-    }
-
-    private void setupSmsObserver() {
-        smsObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
-            @Override
-            public void onChange(boolean selfChange) {
-                super.onChange(selfChange);
-                loadMessages();
-            }
-        };
-    }
-
-    private Bitmap getContactPhoto(String phoneNumber) {
-        Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(phoneNumber));
-        String[] projection = {ContactsContract.PhoneLookup._ID};
-        Cursor cursor = getContentResolver().query(uri, projection, null, null, null);
-        
-        if (cursor != null) {
-            if (cursor.moveToFirst()) {
-                long contactId = cursor.getLong(0);
-                cursor.close();
-                
-                Uri contactUri = ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId);
-                InputStream input = ContactsContract.Contacts.openContactPhotoInputStream(getContentResolver(), contactUri);
-                if (input != null) {
-                    return BitmapFactory.decodeStream(input);
-                }
-            }
-            cursor.close();
-        }
-        return null;
-    }
-
-    private void loadMessages() {
-        executorService.execute(() -> {
-            List<Message> newMessages = new ArrayList<>();
-            String selection = Telephony.Sms.THREAD_ID + " = ?";
-            String[] selectionArgs = {threadId};
-            Cursor cursor = getContentResolver().query(Telephony.Sms.CONTENT_URI, null, selection, selectionArgs, Telephony.Sms.DATE + " ASC");
-
-            if (cursor != null) {
-                int idIndex = cursor.getColumnIndex(Telephony.Sms._ID);
-                int bodyIndex = cursor.getColumnIndex(Telephony.Sms.BODY);
-                int dateIndex = cursor.getColumnIndex(Telephony.Sms.DATE);
-                int typeIndex = cursor.getColumnIndex(Telephony.Sms.TYPE);
-                int statusIndex = cursor.getColumnIndex(Telephony.Sms.STATUS);
-
-                while (cursor.moveToNext()) {
-                    long id = cursor.getLong(idIndex);
-                    String body = cursor.getString(bodyIndex);
-                    long date = cursor.getLong(dateIndex);
-                    int type = cursor.getInt(typeIndex);
-                    int status = cursor.getInt(statusIndex);
-                    newMessages.add(new Message(id, address, body, date, type, status));
-                }
-                cursor.close();
-            }
-
-            new Handler(Looper.getMainLooper()).post(() -> {
-                messageList.clear();
-                messageList.addAll(newMessages);
-                adapter.notifyDataSetChanged();
-                if (messageList.size() > 0) {
-                    recyclerView.scrollToPosition(messageList.size() - 1);
+        ChatViewModel.Factory factory = new ChatViewModel.Factory(
+                SmsRepository.getInstance(this), conversationKey, address);
+        viewModel = new ViewModelProvider(this, factory).get(ChatViewModel.class);
+        viewModel.getMessages().observe(this, messages -> {
+            boolean stayAtBottom = adapter.getItemCount() == 0 || !recyclerView.canScrollVertically(1);
+            adapter.submitList(messages, () -> {
+                if (stayAtBottom && !messages.isEmpty()) {
+                    recyclerView.scrollToPosition(messages.size() - 1);
                 }
             });
+            if (isConversationVisible(conversationKey)) viewModel.markRead();
+        });
+
+        EditText messageInput = findViewById(R.id.editTextMessage);
+        String draftKey = "draft:" + conversationKey;
+        String savedDraft = getPreferences(MODE_PRIVATE).getString(draftKey, "");
+        if (savedInstanceState == null && !savedDraft.isBlank()) messageInput.setText(savedDraft);
+        messageInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence value, int start, int before, int count) {
+                getPreferences(MODE_PRIVATE).edit()
+                        .putString(draftKey, value.toString())
+                        .apply();
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {}
+        });
+        configureSimSelector();
+        FloatingActionButton send = findViewById(R.id.btnSendMessage);
+        send.setOnClickListener(v -> {
+            String body = messageInput.getText().toString().trim();
+            if (!body.isEmpty()) {
+                viewModel.send(body, selectedSubscriptionId);
+                messageInput.setText("");
+            }
+        });
+
+        String initialMessage = getIntent().getStringExtra(EXTRA_INITIAL_MESSAGE);
+        if (savedInstanceState == null && initialMessage != null && !initialMessage.isBlank()) {
+            messageInput.setText(initialMessage);
+            messageInput.setSelection(initialMessage.length());
+            getIntent().removeExtra(EXTRA_INITIAL_MESSAGE);
+        }
+    }
+
+    private void configureSimSelector() {
+        selectedSubscriptionId = SubscriptionManager.getDefaultSmsSubscriptionId();
+        MaterialButton button = findViewById(R.id.btnSim);
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
+                != PackageManager.PERMISSION_GRANTED) return;
+        SubscriptionManager manager = getSystemService(SubscriptionManager.class);
+        if (manager == null) return;
+        List<SubscriptionInfo> subscriptions;
+        try {
+            subscriptions = manager.getActiveSubscriptionInfoList();
+        } catch (SecurityException denied) {
+            return;
+        }
+        if (subscriptions == null || subscriptions.size() < 2) return;
+        if (subscriptions.stream().noneMatch(
+                item -> item.getSubscriptionId() == selectedSubscriptionId)) {
+            selectedSubscriptionId = subscriptions.get(0).getSubscriptionId();
+        }
+        updateSimButton(button, subscriptions);
+        button.setVisibility(View.VISIBLE);
+        button.setOnClickListener(v -> {
+            String[] labels = subscriptions.stream()
+                    .map(item -> item.getDisplayName().toString())
+                    .toArray(String[]::new);
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.choose_sim)
+                    .setItems(labels, (dialog, which) -> {
+                        selectedSubscriptionId = subscriptions.get(which).getSubscriptionId();
+                        updateSimButton(button, subscriptions);
+                    })
+                    .show();
         });
     }
 
-    private void sendMessage() {
-        String body = editTextMessage.getText().toString().trim();
-        if (body.isEmpty()) return;
-
-        SmsManager smsManager = getSystemService(SmsManager.class);
-        
-        Intent sentIntent = new Intent(SENT_ACTION);
-        PendingIntent sentPI = PendingIntent.getBroadcast(this, 0, sentIntent, PendingIntent.FLAG_IMMUTABLE);
-
-        Intent deliveredIntent = new Intent(DELIVERED_ACTION);
-        PendingIntent deliveredPI = PendingIntent.getBroadcast(this, 0, deliveredIntent, PendingIntent.FLAG_IMMUTABLE);
-
-        smsManager.sendTextMessage(address, null, body, sentPI, deliveredPI);
-        editTextMessage.setText("");
-        
-        // Refresh immediately for local feedback
-        loadMessages();
-    }
-
-    private void placeCall() {
-        TelecomManager telecomManager = (TelecomManager) getSystemService(Context.TELECOM_SERVICE);
-        PhoneAccountHandle phoneAccountHandle = new PhoneAccountHandle(
-                new ComponentName(this, MyConnectionService.class), "CommunicationAppAccount");
-
-        // Register phone account if not already registered
-        PhoneAccount phoneAccount = PhoneAccount.builder(phoneAccountHandle, "Communication App")
-                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
-                .build();
-        telecomManager.registerPhoneAccount(phoneAccount);
-
-        Bundle extras = new Bundle();
-        extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, phoneAccountHandle);
-        extras.putInt(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, android.telecom.VideoProfile.STATE_AUDIO_ONLY);
-
-        Uri uri = Uri.fromParts(PhoneAccount.SCHEME_TEL, address, null);
-        try {
-            telecomManager.placeCall(uri, extras);
-            // We removed the redundant CallActivity start from here
-        } catch (SecurityException e) {
-            Toast.makeText(this, "Call permission not granted", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private BroadcastReceiver smsStatusReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            loadMessages();
-            if (DELIVERED_ACTION.equals(intent.getAction())) {
-                Toast.makeText(context, R.string.msg_delivered, Toast.LENGTH_SHORT).show();
+    private void updateSimButton(MaterialButton button, List<SubscriptionInfo> subscriptions) {
+        for (SubscriptionInfo subscription : subscriptions) {
+            if (subscription.getSubscriptionId() == selectedSubscriptionId) {
+                button.setText(subscription.getDisplayName());
+                return;
             }
         }
-    };
+        button.setText(R.string.sim_default);
+    }
+
+    private void showCallOptions() {
+        Intent dial = new Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", address, null));
+        startActivity(dial);
+    }
 
     @Override
     protected void onResume() {
         super.onResume();
-        registerReceiver(smsStatusReceiver, new IntentFilter(SENT_ACTION), Context.RECEIVER_NOT_EXPORTED);
-        registerReceiver(smsStatusReceiver, new IntentFilter(DELIVERED_ACTION), Context.RECEIVER_NOT_EXPORTED);
-        getContentResolver().registerContentObserver(Telephony.Sms.CONTENT_URI, true, smsObserver);
-        loadMessages();
+        visibleConversationKey = conversationKey;
+        NotificationManagerCompat.from(this).cancel(SmsReceiver.notificationId(conversationKey));
+        if (viewModel != null) {
+            viewModel.markRead();
+            viewModel.refresh();
+        }
     }
 
     @Override
     protected void onPause() {
+        if (conversationKey != null && conversationKey.equals(visibleConversationKey)) {
+            visibleConversationKey = null;
+        }
         super.onPause();
-        unregisterReceiver(smsStatusReceiver);
-        getContentResolver().unregisterContentObserver(smsObserver);
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        executorService.shutdown();
     }
 }

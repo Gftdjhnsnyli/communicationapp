@@ -1,34 +1,42 @@
 package com.example.communicationapp;
 
 import android.Manifest;
+import android.app.role.RoleManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.database.Cursor;
-import android.net.Uri;
 import android.os.Bundle;
-import android.provider.ContactsContract;
-import android.provider.Telephony;
-import android.widget.Toast;
-import androidx.annotation.NonNull;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.View;
+import android.widget.EditText;
+import android.widget.TextView;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.splashscreen.SplashScreen;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton;
-import androidx.core.splashscreen.SplashScreen;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import java.util.Map;
 
 public class ConversationListActivity extends AppCompatActivity {
+    private ConversationListViewModel viewModel;
+    private TextView emptyState;
 
-    private static final int PERMISSIONS_REQUEST_CODE = 123;
-    private RecyclerView recyclerView;
-    private ConversationAdapter adapter;
-    private List<Conversation> conversationList = new ArrayList<>();
-    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+    private final ActivityResultLauncher<Intent> roleLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (hasSmsRole()) requestPermissions();
+                else showRoleRequired();
+            });
+
+    private final ActivityResultLauncher<String[]> permissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestMultiplePermissions(), this::permissionsCompleted);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,150 +44,110 @@ public class ConversationListActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_conversation_list);
 
-        recyclerView = findViewById(R.id.recyclerViewConversations);
+        RecyclerView recyclerView = findViewById(R.id.recyclerViewConversations);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        
-        adapter = new ConversationAdapter(conversationList, conversation -> {
-            if (conversation != null && conversation.getThreadId() != null && conversation.getAddress() != null) {
-                Intent intent = new Intent(this, ChatActivity.class);
-                intent.putExtra("thread_id", conversation.getThreadId());
-                intent.putExtra("address", conversation.getAddress());
-                intent.putExtra("contact_name", conversation.getContactName());
-                startActivity(intent);
-            } else {
-                Toast.makeText(this, "Cannot open chat: Missing information", Toast.LENGTH_SHORT).show();
-            }
+        ConversationAdapter adapter = new ConversationAdapter(conversation -> {
+            Intent chat = new Intent(this, ChatActivity.class)
+                    .putExtra(ChatActivity.EXTRA_CONVERSATION_KEY, conversation.conversationKey)
+                    .putExtra(ChatActivity.EXTRA_ADDRESS, conversation.address)
+                    .putExtra(ChatActivity.EXTRA_CONTACT_NAME, conversation.getDisplayName());
+            startActivity(chat);
         });
         recyclerView.setAdapter(adapter);
+        emptyState = findViewById(R.id.textEmptyState);
 
-        ExtendedFloatingActionButton fab = findViewById(R.id.fabNewMessage);
-        fab.setOnClickListener(v -> {
-            Intent intent = new Intent(this, MainActivity.class);
-            startActivity(intent);
+        viewModel = new ViewModelProvider(this).get(ConversationListViewModel.class);
+        viewModel.getConversations().observe(this, conversations -> {
+            adapter.submitList(conversations);
+            emptyState.setVisibility(conversations.isEmpty() ? View.VISIBLE : View.GONE);
         });
 
-        checkPermissions();
+        EditText search = findViewById(R.id.searchInput);
+        search.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence value, int start, int before, int count) {
+                viewModel.setQuery(value.toString());
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {}
+        });
+
+        ExtendedFloatingActionButton newMessage = findViewById(R.id.fabNewMessage);
+        newMessage.setOnClickListener(v -> {
+            if (hasSmsRole()) startActivity(new Intent(this, MainActivity.class));
+            else ensureSmsRole();
+        });
+        ensureSmsRole();
     }
 
-    private void checkPermissions() {
-        String[] permissions = {
-            Manifest.permission.READ_SMS,
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.READ_CONTACTS
-        };
-
-        boolean allGranted = true;
-        for (String p : permissions) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                allGranted = false;
-                break;
-            }
-        }
-
-        if (!allGranted) {
-            ActivityCompat.requestPermissions(this, permissions, PERMISSIONS_REQUEST_CODE);
+    private void ensureSmsRole() {
+        RoleManager roleManager = getSystemService(RoleManager.class);
+        if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_SMS)
+                && !roleManager.isRoleHeld(RoleManager.ROLE_SMS)) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.sms_role_title)
+                    .setMessage(R.string.sms_role_mms_warning)
+                    .setPositiveButton(R.string.continue_label, (dialog, which) ->
+                            roleLauncher.launch(
+                                    roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)))
+                    .setNegativeButton(R.string.not_now, (dialog, which) -> showRoleRequired())
+                    .show();
         } else {
-            loadConversations();
+            requestPermissions();
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSIONS_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                loadConversations();
-            }
-        }
+    private boolean hasSmsRole() {
+        RoleManager roleManager = getSystemService(RoleManager.class);
+        return roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_SMS)
+                && roleManager.isRoleHeld(RoleManager.ROLE_SMS);
     }
 
-    private void loadConversations() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
+    private void showRoleRequired() {
+        emptyState.setText(R.string.sms_access_required);
+        emptyState.setVisibility(View.VISIBLE);
+    }
 
-        executorService.execute(() -> {
-            List<Conversation> newConversations = new ArrayList<>();
-            Uri uri = Telephony.Threads.CONTENT_URI.buildUpon().appendQueryParameter("simple", "true").build();
-            String[] projection = {
-                Telephony.Threads._ID,
-                Telephony.Threads.SNIPPET,
-                Telephony.Threads.DATE,
-                Telephony.Threads.RECIPIENT_IDS
-            };
-
-            Cursor cursor = getContentResolver().query(uri, projection, null, null, Telephony.Threads.DATE + " DESC");
-
-            if (cursor != null) {
-                int idIndex = cursor.getColumnIndex(Telephony.Threads._ID);
-                int snippetIndex = cursor.getColumnIndex(Telephony.Threads.SNIPPET);
-                int dateIndex = cursor.getColumnIndex(Telephony.Threads.DATE);
-                int recipientIndex = cursor.getColumnIndex(Telephony.Threads.RECIPIENT_IDS);
-
-                while (cursor.moveToNext()) {
-                    String threadId = cursor.getString(idIndex);
-                    String snippet = cursor.getString(snippetIndex);
-                    long date = cursor.getLong(dateIndex);
-                    String recipientId = cursor.getString(recipientIndex);
-
-                    String address = getAddressFromRecipientId(recipientId);
-                    String contactName = getContactName(address);
-
-                    newConversations.add(new Conversation(threadId, address, contactName, snippet, date));
-                }
-                cursor.close();
-            }
-
-            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-                conversationList.clear();
-                conversationList.addAll(newConversations);
-                adapter.notifyDataSetChanged();
-            });
+    private void requestPermissions() {
+        permissionLauncher.launch(new String[]{
+                Manifest.permission.READ_SMS,
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.RECEIVE_MMS,
+                Manifest.permission.RECEIVE_WAP_PUSH,
+                Manifest.permission.READ_CONTACTS,
+                Manifest.permission.READ_PHONE_STATE,
+                Manifest.permission.POST_NOTIFICATIONS
         });
     }
 
-    private String getAddressFromRecipientId(String recipientId) {
-        if (recipientId == null || recipientId.isEmpty()) return "";
-        
-        // Use a safer URI for recipient address lookup
-        Uri uri = Uri.parse("content://mms-sms/canonical-address/" + recipientId);
-        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                return cursor.getString(0);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
+    private void permissionsCompleted(Map<String, Boolean> results) {
+        if (Boolean.TRUE.equals(results.get(Manifest.permission.READ_SMS))
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS)
+                == PackageManager.PERMISSION_GRANTED) {
+            ((CommunicationApp) getApplication()).startSmsObservation();
+            emptyState.setText(R.string.no_conversations);
+            com.example.communicationapp.data.SmsRepository.getInstance(this)
+                    .refreshContactNames();
+            viewModel.refresh();
+        } else {
+            emptyState.setText(R.string.sms_access_required);
+            emptyState.setVisibility(View.VISIBLE);
         }
-        return recipientId; // Fallback to recipientId if lookup fails
-    }
-
-    private String getContactName(String phoneNumber) {
-        Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(phoneNumber));
-        String[] projection = {ContactsContract.PhoneLookup.DISPLAY_NAME};
-        Cursor cursor = getContentResolver().query(uri, projection, null, null, null);
-        if (cursor != null) {
-            if (cursor.moveToFirst()) {
-                String name = cursor.getString(0);
-                cursor.close();
-                return name;
-            }
-            cursor.close();
-        }
-        return phoneNumber;
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
-            loadConversations();
+        if (!hasSmsRole()) {
+            showRoleRequired();
+        } else if (viewModel != null && ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS)
+                == PackageManager.PERMISSION_GRANTED) {
+            viewModel.refresh();
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        executorService.shutdown();
     }
 }

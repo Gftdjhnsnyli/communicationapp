@@ -1,38 +1,39 @@
 package com.example.communicationapp;
 
-import android.Manifest;
-import android.app.AlertDialog;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.telephony.SmsManager;
-import android.view.View;
-import android.widget.Button;
+import android.provider.ContactsContract;
+import android.database.Cursor;
 import android.widget.EditText;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import androidx.core.app.ActivityCompat;
-import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
-import androidx.core.content.ContextCompat;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textfield.TextInputLayout;
 
 public class MainActivity extends AppCompatActivity {
-
-    private EditText editTextPhone, editTextMessage;
-    private TextInputLayout layoutPhone, layoutMessage;
-    private MaterialButton btnSendSMS, btnMakeCall, btnShowNotification, btnShowDialog;
-
-    private static final int PERMISSION_REQUEST_CODE = 100;
-    private static final String CHANNEL_ID = "communication_channel";
+    private EditText phoneInput;
+    private EditText messageInput;
+    private TextInputLayout phoneLayout;
+    private TextInputLayout messageLayout;
+    private NewMessageViewModel viewModel;
+    private final ActivityResultLauncher<Intent> contactPicker = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                Uri contact = result.getData() == null ? null : result.getData().getData();
+                if (result.getResultCode() != RESULT_OK || contact == null) return;
+                String[] projection = {ContactsContract.CommonDataKinds.Phone.NUMBER};
+                try (Cursor cursor = getContentResolver().query(
+                        contact, projection, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        phoneInput.setText(cursor.getString(0));
+                    }
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,160 +42,68 @@ public class MainActivity extends AppCompatActivity {
 
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
+        toolbar.setNavigationOnClickListener(v -> finish());
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         }
-        toolbar.setNavigationOnClickListener(v -> finish());
 
-        // Initialize views
-        editTextPhone = findViewById(R.id.editTextPhone);
-        editTextMessage = findViewById(R.id.editTextMessage);
-        layoutPhone = findViewById(R.id.layoutPhone);
-        layoutMessage = findViewById(R.id.layoutMessage);
-        btnSendSMS = findViewById(R.id.btnSendSMS);
-        btnMakeCall = findViewById(R.id.btnMakeCall);
-        btnShowNotification = findViewById(R.id.btnShowNotification);
-        btnShowDialog = findViewById(R.id.btnShowDialog);
+        phoneInput = findViewById(R.id.editTextPhone);
+        messageInput = findViewById(R.id.editTextMessage);
+        phoneLayout = findViewById(R.id.layoutPhone);
+        messageLayout = findViewById(R.id.layoutMessage);
+        viewModel = new ViewModelProvider(this).get(NewMessageViewModel.class);
+        phoneLayout.setEndIconOnClickListener(v -> contactPicker.launch(new Intent(
+                Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)));
 
-        // Create notification channel
-        createNotificationChannel();
-
-        // Request permissions
-        requestPermissions();
-
-        // Set click listeners
-        btnSendSMS.setOnClickListener(v -> sendSMS());
-
-        btnMakeCall.setOnClickListener(v -> makePhoneCall());
-
-        btnShowNotification.setOnClickListener(v -> showNotification());
-
-        btnShowDialog.setOnClickListener(v -> showDialogBox());
-    }
-
-    // Request runtime permissions
-    private void requestPermissions() {
-        String[] permissions = {
-                Manifest.permission.SEND_SMS,
-                Manifest.permission.CALL_PHONE,
-                Manifest.permission.POST_NOTIFICATIONS
-        };
-
-        boolean allPermissionsGranted = true;
-        for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                allPermissionsGranted = false;
-                break;
+        Uri recipient = Intent.ACTION_SENDTO.equals(getIntent().getAction())
+                ? getIntent().getData() : null;
+        if (recipient != null && ("mms".equalsIgnoreCase(recipient.getScheme())
+                || "mmsto".equalsIgnoreCase(recipient.getScheme()))) {
+            android.widget.Toast.makeText(this, R.string.mms_not_supported,
+                    android.widget.Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+        if (recipient != null && ("sms".equalsIgnoreCase(recipient.getScheme())
+                || "smsto".equalsIgnoreCase(recipient.getScheme()))) {
+            String schemePart = recipient.getEncodedSchemeSpecificPart();
+            int queryStart = schemePart.indexOf('?');
+            phoneInput.setText(Uri.decode(
+                    queryStart < 0 ? schemePart : schemePart.substring(0, queryStart)));
+            if (queryStart >= 0) {
+                Uri query = Uri.parse("https://localhost/?" + schemePart.substring(queryStart + 1));
+                String body = query.getQueryParameter("body");
+                if (body == null) body = query.getQueryParameter("sms_body");
+                if (body != null) messageInput.setText(body);
             }
         }
+        CharSequence sharedText = getIntent().getCharSequenceExtra(Intent.EXTRA_TEXT);
+        if (sharedText == null) sharedText = getIntent().getCharSequenceExtra("sms_body");
+        if (sharedText != null) messageInput.setText(sharedText);
 
-        if (!allPermissionsGranted) {
-            ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE);
-        }
+        MaterialButton startChat = findViewById(R.id.btnSendSMS);
+        startChat.setOnClickListener(v -> openConversation());
     }
 
-    // Send SMS
-    private void sendSMS() {
-        String phoneNumber = editTextPhone.getText().toString().trim();
-        String message = editTextMessage.getText().toString().trim();
-
-        layoutPhone.setError(null);
-        layoutMessage.setError(null);
-
-        boolean error = false;
-        if (phoneNumber.isEmpty()) {
-            layoutPhone.setError("Phone number is required");
-            error = true;
-        }
-        if (message.isEmpty()) {
-            layoutMessage.setError("Message is required");
-            error = true;
-        }
-
-        if (error) return;
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) {
-            try {
-                SmsManager smsManager = getSystemService(SmsManager.class);
-                smsManager.sendTextMessage(phoneNumber, null, message, null, null);
-                Toast.makeText(this, "SMS sent successfully", Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                Toast.makeText(this, "Failed to send SMS: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            }
-        } else {
-            Toast.makeText(this, "SMS permission not granted", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    // Make phone call
-    private void makePhoneCall() {
-        String phoneNumber = editTextPhone.getText().toString().trim();
-
-        layoutPhone.setError(null);
-
-        if (phoneNumber.isEmpty()) {
-            layoutPhone.setError("Phone number is required");
+    private void openConversation() {
+        String address = phoneInput.getText().toString().trim();
+        String body = messageInput.getText().toString().trim();
+        phoneLayout.setError(address.isEmpty() ? getString(R.string.error_phone_required) : null);
+        messageLayout.setError(null);
+        if (address.isEmpty()) return;
+        if (address.contains(",") || address.contains(";")) {
+            phoneLayout.setError(getString(R.string.multiple_recipients_not_supported));
             return;
         }
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-            Intent callIntent = new Intent(Intent.ACTION_CALL);
-            callIntent.setData(Uri.parse("tel:" + phoneNumber));
-            startActivity(callIntent);
-        } else {
-            Toast.makeText(this, "Call permission not granted", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    // Create notification channel (required for Android 8.0+)
-    private void createNotificationChannel() {
-        CharSequence name = "Communication Channel";
-        String description = "Channel for communication notifications";
-        int importance = NotificationManager.IMPORTANCE_DEFAULT;
-        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
-        channel.setDescription(description);
-
-        NotificationManager notificationManager = getSystemService(NotificationManager.class);
-        notificationManager.createNotificationChannel(channel);
-    }
-
-    // Show notification
-    private void showNotification() {
-        String message = editTextMessage.getText().toString().trim();
-        if (message.isEmpty()) {
-            message = "This is a test notification";
-        }
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("Communication App")
-                .setContentText(message)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setAutoCancel(true);
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
-            notificationManager.notify(1, builder.build());
-            Toast.makeText(this, "Notification shown", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "Notification permission not granted", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    // Show dialog box
-    private void showDialogBox() {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.dialog_title)
-                .setMessage(R.string.dialog_message)
-                .setPositiveButton(R.string.dialog_btn_ok, (dialog, which) -> 
-                        Toast.makeText(MainActivity.this, R.string.toast_clicked_ok, Toast.LENGTH_SHORT).show())
-                .setNegativeButton(R.string.dialog_btn_cancel, (dialog, which) -> {
-                        Toast.makeText(MainActivity.this, R.string.toast_clicked_cancel, Toast.LENGTH_SHORT).show();
-                        dialog.dismiss();
-                })
-                .setNeutralButton(R.string.dialog_btn_info, (dialog, which) -> 
-                        Toast.makeText(MainActivity.this, R.string.toast_clicked_info, Toast.LENGTH_SHORT).show())
-                .setCancelable(false)
-                .show();
+        viewModel.openConversation(address, conversation -> {
+            Intent chat = new Intent(this, ChatActivity.class)
+                    .putExtra(ChatActivity.EXTRA_CONVERSATION_KEY, conversation.conversationKey)
+                    .putExtra(ChatActivity.EXTRA_ADDRESS, conversation.address)
+                    .putExtra(ChatActivity.EXTRA_CONTACT_NAME, conversation.getDisplayName());
+            if (!body.isEmpty()) chat.putExtra(ChatActivity.EXTRA_INITIAL_MESSAGE, body);
+            startActivity(chat);
+            finish();
+        });
     }
 }

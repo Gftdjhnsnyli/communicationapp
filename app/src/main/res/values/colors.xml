@@ -24,7 +24,4 @@
     <color name="onBackground">#1C1B1F</color>
     <color name="surface">#FFFBFE</color>
     <color name="onSurface">#1C1B1F</color>
-
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
 </resources>

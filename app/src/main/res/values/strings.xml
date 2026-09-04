@@ -2,53 +2,36 @@
     <!-- App Name -->
     <string name="app_name">Communication App</string>
 
-    <!-- UI Elements (Layout) -->
-    <string name="title_main">Communication App</string>
-    <string name="title_conversations">Messages</string>
     <string name="hint_phone">Enter Phone Number</string>
     <string name="hint_message">Enter Message</string>
-    <string name="btn_sms">Send SMS</string>
-    <string name="btn_call">Make Phone Call</string>
-    <string name="btn_notification">Show Notification</string>
-    <string name="btn_dialog">Show Dialog Box</string>
-
     <string name="fab_start_chat">Start chat</string>
     <string name="hint_text_message">Text message</string>
     <string name="content_desc_send">Send</string>
     <string name="title_new_message">New Message</string>
-    <string name="msg_delivered">Message Delivered</string>
-
-    <!-- Toast Messages -->
-    <string name="toast_empty_sms">Please enter phone number and message</string>
-    <string name="toast_sms_sent">SMS sent successfully</string>
-    <string name="toast_sms_failed">Failed to send SMS: </string>
-    <string name="toast_empty_phone">Please enter a phone number</string>
-    <string name="toast_no_sms_perm">SMS permission not granted</string>
-    <string name="toast_no_call_perm">Call permission not granted</string>
-    <string name="toast_notif_shown">Notification shown</string>
-    <string name="toast_no_notif_perm">Notification permission not granted</string>
-    <string name="toast_clicked_ok">You clicked OK</string>
-    <string name="toast_clicked_cancel">You clicked Cancel</string>
-    <string name="toast_clicked_info">You clicked Info</string>
-
-    <!-- Notification Strings -->
     <string name="notif_channel_name">Communication Channel</string>
     <string name="notif_channel_desc">Channel for communication notifications</string>
-    <string name="notif_default_msg">This is a test notification</string>
-    <string name="notif_title">Communication App</string>
-
-    <!-- Dialog Strings -->
-    <string name="dialog_title">Dialog Box</string>
-    <string name="dialog_message">This is an alert dialog. What would you like to do?</string>
-    <string name="dialog_btn_ok">OK</string>
-    <string name="dialog_btn_cancel">Cancel</string>
-    <string name="dialog_btn_info">Info</string>
     <string name="search_hint">Search conversations</string>
     <string name="content_desc_call">Call</string>
-    <string name="btn_answer">Answer</string>
-    <string name="btn_reject">Reject</string>
-    <string name="btn_hangup">Hangup</string>
-    <string name="call_status_ringing">Ringing...</string>
-    <string name="call_status_active">Active Call</string>
-    <string name="call_status_disconnected">Disconnected</string>
+    <string name="btn_open_chat">Open conversation</string>
+    <string name="no_conversations">No conversations yet</string>
+    <string name="sms_access_required">Set this app as the default SMS app to show messages.</string>
+    <string name="invalid_conversation">Invalid conversation</string>
+    <string name="error_phone_required">Phone number is required</string>
+    <string name="status_sending">Sending</string>
+    <string name="status_sent">Sent</string>
+    <string name="status_delivered">Delivered</string>
+    <string name="status_failed">Failed</string>
+    <string name="content_desc_back">Back</string>
+    <string name="mms_not_supported">MMS support is not configured yet.</string>
+    <string name="sms_role_title">Make this the SMS app?</string>
+    <string name="sms_role_mms_warning">SMS works, but this version cannot download MMS attachments. Incoming MMS may be unavailable while this app is the default.</string>
+    <string name="continue_label">Continue</string>
+    <string name="not_now">Not now</string>
+    <string name="retry_message_title">Retry message?</string>
+    <string name="retry_message_prompt">This creates a new send attempt. Carrier charges may apply.</string>
+    <string name="retry">Retry</string>
+    <string name="sim_default">SIM</string>
+    <string name="choose_sim">Choose SIM</string>
+    <string name="choose_contact">Choose contact</string>
+    <string name="multiple_recipients_not_supported">Group recipients require MMS and are not supported yet.</string>
 </resources>

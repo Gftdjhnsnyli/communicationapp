@@ -55,6 +55,7 @@
                     android:layout_marginStart="4dp"
                     android:layout_gravity="center_vertical"
                     android:src="@android:drawable/checkbox_on_background"
+                    android:contentDescription="@string/status_sent"
                     app:tint="?attr/colorOnPrimaryContainer"
                     android:alpha="0.7"
                     tools:visibility="visible"/>
